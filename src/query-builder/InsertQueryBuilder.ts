@@ -17,11 +17,16 @@ import { AuroraMysqlDriver } from "../driver/aurora-mysql/AuroraMysqlDriver"
 import { DriverUtils } from "../driver/DriverUtils"
 import { ObjectUtils } from "../util/ObjectUtils"
 import { InstanceChecker } from "../util/InstanceChecker"
+import { WhereExpressionBuilder } from "./WhereExpressionBuilder"
+import { Brackets } from "./Brackets"
 
 /**
  * Allows to build complex sql queries in a fashion way and execute those queries.
  */
-export class InsertQueryBuilder<Entity> extends QueryBuilder<Entity> {
+export class InsertQueryBuilder<Entity>
+    extends QueryBuilder<Entity>
+    implements WhereExpressionBuilder
+{
     readonly "@instanceof" = Symbol.for("InsertQueryBuilder")
 
     // -------------------------------------------------------------------------
@@ -392,6 +397,96 @@ export class InsertQueryBuilder<Entity> extends QueryBuilder<Entity> {
         return this
     }
 
+    /**
+     * Sets WHERE condition in the query builder.
+     * If you had previously WHERE expression defined,
+     * calling this function will override previously set WHERE conditions.
+     * Additionally you can add parameters used in where expression.
+     */
+    where(
+        where:
+            | string
+            | ((qb: this) => string)
+            | Brackets
+            | ObjectLiteral
+            | ObjectLiteral[],
+        parameters?: ObjectLiteral,
+    ): this {
+        this.expressionMap.wheres = [] // don't move this block below since computeWhereParameter can add where expressions
+        const condition = this.getWhereCondition(where)
+        if (condition)
+            this.expressionMap.wheres = [
+                { type: "simple", condition: condition },
+            ]
+        if (parameters) this.setParameters(parameters)
+        return this
+    }
+
+    /**
+     * Adds new AND WHERE condition in the query builder.
+     * Additionally you can add parameters used in where expression.
+     */
+    andWhere(
+        where:
+            | string
+            | ((qb: this) => string)
+            | Brackets
+            | ObjectLiteral
+            | ObjectLiteral[],
+        parameters?: ObjectLiteral,
+    ): this {
+        this.expressionMap.wheres.push({
+            type: "and",
+            condition: this.getWhereCondition(where),
+        })
+        if (parameters) this.setParameters(parameters)
+        return this
+    }
+
+    /**
+     * Adds new OR WHERE condition in the query builder.
+     * Additionally you can add parameters used in where expression.
+     */
+    orWhere(
+        where:
+            | string
+            | ((qb: this) => string)
+            | Brackets
+            | ObjectLiteral
+            | ObjectLiteral[],
+        parameters?: ObjectLiteral,
+    ): this {
+        this.expressionMap.wheres.push({
+            type: "or",
+            condition: this.getWhereCondition(where),
+        })
+        if (parameters) this.setParameters(parameters)
+        return this
+    }
+
+    /**
+     * Sets WHERE condition in the query builder with a condition for the given ids.
+     * If you had previously WHERE expression defined,
+     * calling this function will override previously set WHERE conditions.
+     */
+    whereInIds(ids: any | any[]): this {
+        return this.where(this.getWhereInIdsCondition(ids))
+    }
+
+    /**
+     * Adds new AND WHERE with conditions for the given ids.
+     */
+    andWhereInIds(ids: any | any[]): this {
+        return this.andWhere(this.getWhereInIdsCondition(ids))
+    }
+
+    /**
+     * Adds new OR WHERE with conditions for the given ids.
+     */
+    orWhereInIds(ids: any | any[]): this {
+        return this.orWhere(this.getWhereInIdsCondition(ids))
+    }
+
     // -------------------------------------------------------------------------
     // Protected Methods
     // -------------------------------------------------------------------------
@@ -493,6 +588,8 @@ export class InsertQueryBuilder<Entity> extends QueryBuilder<Entity> {
                 } else if (conflict) {
                     conflictTarget += ` ON CONSTRAINT ${this.escape(conflict)}`
                 }
+
+                conflictTarget += this.createWhereExpression();
 
                 if (Array.isArray(overwrite)) {
                     query += ` ${conflictTarget} DO UPDATE SET `
